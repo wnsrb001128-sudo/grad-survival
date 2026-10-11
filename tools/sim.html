@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>대학원에서 살아남기 — 밸런스 시뮬레이터</title>
+<style>
+  body { font-family: "Malgun Gothic", sans-serif; background: #f8f9fa; color: #212529; padding: 16px; }
+  pre { background: #fff; border: 1px solid #dee2e6; padding: 12px; white-space: pre-wrap; font-size: 12px; }
+</style>
+</head>
+<body>
+<h1>밸런스 시뮬레이터</h1>
+<p>콘솔에서 <code>GS.Sim.start(GS.Sim.plan({ seeds: 2 }))</code> 후 <code>GS.Sim.work(15000)</code>을 반복하고 <code>GS.Sim.report()</code>로 결과를 확인합니다.</p>
+<pre id="out">대기 중</pre>
+<script src="../js/util.js"></script>
+<script src="../data/config.js"></script>
+<script src="../data/weapons.js"></script>
+<script src="../data/passives.js"></script>
+<script src="../data/enemies.js"></script>
+<script src="../data/chapters.js"></script>
+<script src="../data/sanctuaries.js"></script>
+<script src="../data/items.js"></script>
+<script src="../js/game.js"></script>
+<script src="../js/weapons.js"></script>
+<script src="../js/enemies.js"></script>
+<script src="../js/bot.js"></script>
+<script src="sim.js"></script>
+</body>
+</html>
