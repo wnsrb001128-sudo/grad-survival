@@ -5,24 +5,27 @@
   const Sim = GS.Sim = {};
   const DT = 1 / 30;
 
+  // chars: ['dry', 'wet'] (기본 둘 다), weapons 를 주면 그 무기만
   Sim.plan = function (o) {
     o = o || {};
     const list = [];
-    const weapons = o.weapons || GS.data.config.startWeapons;
     const modes = o.modes || ['normal'];
-    for (const mode of modes) {
-      for (const weapon of weapons) {
-        for (let s = 0; s < (o.seeds || 2); s++) list.push({ weapon, mode, seed: 1000 + s * 7919, maxTime: o.maxTime || 1500 });
+    for (const char of o.chars || Object.keys(GS.data.characters)) {
+      const weapons = o.weapons || GS.data.characters[char].startWeapons;
+      for (const mode of modes) {
+        for (const weapon of weapons) {
+          for (let s = 0; s < (o.seeds || 2); s++) list.push({ char, weapon, mode, seed: 1000 + s * 7919, maxTime: o.maxTime || 1500 });
+        }
       }
     }
     return list;
   };
 
   Sim.create = function (opt) {
-    const g = new GS.Game({ seed: opt.seed, startWeapon: opt.weapon, viewW: 1280, viewH: 720 });
+    const g = new GS.Game({ seed: opt.seed, startWeapon: opt.weapon, character: opt.char, viewW: 1280, viewH: 720 });
     const run = { opt, g, snaps: [], nextSnap: 60, judgment: null, hpMin: 1, t0: performance.now(), frames: 0 };
     g.on('choice', (c) => {
-      if (c.type === 'judgment') run.judgment = { pass: c.pass, score: Math.round(c.score), level: g.player.level, kills: g.kills };
+      if (c.type === 'judgment') run.judgment = { pass: c.pass, scoreOk: c.scoreOk, bossDown: c.bossDown, score: Math.round(c.score), level: g.player.level, kills: g.kills };
     });
     return run;
   };
@@ -51,12 +54,14 @@
   Sim.finish = function (run) {
     const g = run.g;
     return {
-      weapon: run.opt.weapon, mode: run.opt.mode, seed: run.opt.seed,
+      char: run.opt.char || 'dry', weapon: run.opt.weapon, mode: run.opt.mode, seed: run.opt.seed,
       end: g.phase, time: Math.round(g.time), phd: g.phd, phdTime: Math.round(g.phdTime),
       level: g.player.level, kills: g.kills, score: Math.round(g.score), hpMin: Math.round(run.hpMin * 100),
       judgment: run.judgment,
       evos: g.evolutions.map((e) => e.to + '@' + Math.round(e.time)),
       bosses: g.bossKills.map((b) => b.name + '@' + Math.round(b.time)),
+      finalAt: (g.bossKills.find((b) => b.id === g.finalBoss()) || {}).time, // 최종 보스를 쓰러뜨린 시각
+      hazardHits: g.hazardHits, // 보스 특수 패턴에 맞은 횟수
       dmg: g.weapons.map((w) => w.def.name + ':' + Math.round(w.dmg)),
       passives: g.passives.map((p) => p.id + p.level).join(' '),
       snaps: run.snaps,
@@ -99,10 +104,10 @@
     GS.data.chapters.reduce((s, ch) => { ends.push(s + ch.duration); return s + ch.duration; }, 0);
     return Sim.results.map((r) => {
       const at = (t) => { const s = r.snaps.find((x) => x.t === t); return s ? `L${s.lv}/${s.score}/hp${s.hp}` : '-'; };
-      const j = r.judgment ? (r.judgment.pass ? 'PASS' : 'FAIL') + r.judgment.score : '-';
+      const j = r.judgment ? (r.judgment.pass ? 'PASS' : 'FAIL') + r.judgment.score + (r.judgment.scoreOk ? '' : ' 실적X') + (r.judgment.bossDown ? '' : ' 보스X') : '-';
       const firstEvo = r.evos.length ? r.evos[0].split('@')[1] : '-';
       const waves = ends.map((t, i) => `${i + 1}차끝 ${at(t)}`).join(' | ');
-      return `${r.mode[0]}/${r.weapon.padEnd(8)} ${r.end.padEnd(8)} t${String(r.time).padStart(4)} | ${waves} | evo1@${firstEvo} n${r.evos.length} | ${j} | phd${r.phdTime} | boss ${r.bosses.length} | hpMin${r.hpMin}%`;
+      return `${r.char}/${r.mode[0]}/${r.weapon.padEnd(8)} ${r.end.padEnd(8)} t${String(r.time).padStart(4)} | ${waves} | evo1@${firstEvo} n${r.evos.length} | ${j} | phd${r.phdTime} | boss ${r.bosses.length} final@${r.finalAt ? Math.round(r.finalAt) : '-'} | 패턴피격 ${r.hazardHits} | hpMin${r.hpMin}%`;
     }).join('\n');
   };
 

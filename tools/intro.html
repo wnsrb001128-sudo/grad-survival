@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>대학원에서 살아남기 — 소개 영상 만들기</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
+<style>
+  body { margin: 0; padding: 16px; background: #1b1f2a; color: #e9ecef; font-family: "Pretendard", "Malgun Gothic", sans-serif; }
+  h1 { margin: 0 0 6px; font-size: 20px; }
+  p { margin: 0 0 12px; color: #adb5bd; font-size: 14px; }
+  #game { display: block; width: min(960px, 100%); aspect-ratio: 16 / 9; background: #000; border-radius: 10px; }
+  .bar { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+  button { font: inherit; font-weight: 800; padding: 9px 16px; border-radius: 10px; border: 0; background: #4c6ef5; color: #fff; cursor: pointer; }
+  button.sub { background: #495057; }
+  #status { font-size: 14px; }
+  .track { width: min(960px, 100%); height: 6px; background: #343a40; border-radius: 3px; overflow: hidden; }
+  #bar { width: 0; height: 100%; background: #74c0fc; }
+  a { color: #74c0fc; font-weight: 800; }
+</style>
+</head>
+<body>
+<h1>소개 영상 내보내기</h1>
+<p>게임의 기본 소개 영상(js/intro.js 의 SCENES)을 MP4 파일로 만듭니다. 만든 파일을 media/intro.mp4 로 넣으면 게임에서는 그 파일이 재생돼요. 직접 편집한 영상을 media/intro.mp4 로 넣어도 됩니다.</p>
+<canvas id="game" width="1280" height="720"></canvas>
+<div class="bar">
+  <button id="preview" class="sub">▶ 미리보기</button>
+  <button id="make">🎞 MP4 만들기</button>
+  <span id="status">크롬이나 엣지에서 열어 주세요</span>
+  <a id="dl" download="intro.mp4" hidden>intro.mp4 내려받기</a>
+</div>
+<div class="track"><div id="bar"></div></div>
+
+<script src="../js/util.js"></script>
+<script src="../data/config.js"></script>
+<script src="../data/characters.js"></script>
+<script src="../data/weapons.js"></script>
+<script src="../data/passives.js"></script>
+<script src="../data/enemies.js"></script>
+<script src="../data/chapters.js"></script>
+<script src="../data/sanctuaries.js"></script>
+<script src="../data/items.js"></script>
+<script src="../js/game.js"></script>
+<script src="../js/weapons.js"></script>
+<script src="../js/enemies.js"></script>
+<script src="../js/bot.js"></script>
+<script src="../js/render.js"></script>
+<script src="../js/art.js"></script>
+<script src="../js/student.js"></script>
+<script src="../js/scene.js"></script>
+<script src="../js/wetlab.js"></script>
+<script src="../js/world.js"></script>
+<script src="../js/hud.js"></script>
+<script src="../js/intro.js"></script>
+<script src="intro.js"></script>
+</body>
+</html>
