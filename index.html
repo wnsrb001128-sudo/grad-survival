@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>대학원에서 살아남기</title>
+<!-- 글꼴: 본문 Pretendard, 제목·숫자 Black Han Sans (불러오지 못하면 맑은 고딕으로 표시) -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard-dynamic-subset.min.css">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -13,6 +18,7 @@
 <!-- 데이터 (수치를 바꾸려면 data/ 폴더만 수정) -->
 <script src="js/util.js"></script>
 <script src="data/config.js"></script>
+<script src="data/characters.js"></script>
 <script src="data/weapons.js"></script>
 <script src="data/passives.js"></script>
 <script src="data/enemies.js"></script>
@@ -26,9 +32,16 @@
 <script src="js/enemies.js"></script>
 <script src="js/bot.js"></script>
 
-<!-- 화면 -->
+<!-- 화면 (render: 뼈대·연출 / art: 적·아이템 그림 / student: 주인공 / scene: 연구실 배경(Dry lab) / wetlab: 실험실 배경(Wet lab) / world: 전투 화면 / hud: HUD·배너 / intro: 기본 소개 영상) -->
 <script src="js/audio.js"></script>
 <script src="js/render.js"></script>
+<script src="js/art.js"></script>
+<script src="js/student.js"></script>
+<script src="js/scene.js"></script>
+<script src="js/wetlab.js"></script>
+<script src="js/world.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/intro.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
 </body>
