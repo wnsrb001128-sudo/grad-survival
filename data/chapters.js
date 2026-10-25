@@ -1,5 +1,6 @@
-// 웨이브(챕터) 데이터. 1차~4차 각 4분, 4차가 끝나면 연구 실적으로 취업 판정.
+// 웨이브(챕터) 데이터. 1차~4차 각 4분, 4차가 끝나면 취업 판정 (연구 실적 + 4차 최종 보스 격파).
 // hpMult: 이 챕터에서 나오는 적 체력 배율
+// segments[].rangedMax: 그 구간에 한꺼번에 있을 수 있는 원거리(탄을 쏘는) 적 수 (탄막 밀도 조절)
 // segments: t초부터 적용 (pool = 등장 적 가중치, min = 필드 최소 유지 수, interval/batch = 추가 소환 주기/수)
 //           필드 적이 min×2+20 이상이면 추가 소환을 멈춘다 (cap 으로 직접 지정 가능)
 // events: ring(원형 포위) / line(화면 횡단 떼) / elite(엘리트, Accept 메일 드롭) / burst(한꺼번에 소환)
@@ -44,6 +45,7 @@
         { t: 120, type: 'ring', enemy: 'ta', count: 18, radius: 440, msg: '📋 조교 업무에 포위됐다' },
         { t: 144, type: 'elite', enemy: 'grading', msg: '💯 기말 채점 몰아치기!' },
       ],
+      midBoss: { t: 100, enemy: 'grant', msg: '🧾 연구비 정산 기간! 영수증 붙이고 엑셀을 맞춰라' },
       boss: { t: 180, enemy: 'kickoff', msg: '과제 킥오프 미팅이 소집되었다!' },
     },
     {
@@ -63,33 +65,36 @@
         { t: 128, type: 'elite', enemy: 'revision' },
         { t: 148, type: 'ring', enemy: 'project_meeting', count: 18, radius: 450, msg: '💼 과제 미팅 연속 일정!' },
       ],
+      midBoss: { t: 112, enemy: 'submission', msg: '📤 학회 논문 초록 마감이 다가온다!' },
       boss: { t: 180, enemy: 'poster', msg: '학회 포스터 발표 세션 시작!' },
     },
     {
-      name: '4차', title: '석사 4학기', duration: 240, hpMult: 2.8,
+      name: '4차', title: '석사 4학기', duration: 240, hpMult: 2.5,
       intro: '졸업이 코앞. 실적을 쌓아 취업하자!',
       segments: [
-        { t: 0,   pool: { proposal: 2, project_meeting: 2, revision: 2 }, min: 110, interval: 0.4, batch: 2 },
-        { t: 56,  pool: { proposal: 3, reviewer2: 1, revision: 2 }, min: 120, interval: 0.38, batch: 2 },
-        { t: 120, pool: { proposal: 3, reviewer2: 2, project_meeting: 1 }, min: 130, interval: 0.35, batch: 2 },
+        { t: 0,   pool: { proposal: 2, project_meeting: 2, revision: 2, interview: 1 }, min: 110, interval: 0.4, batch: 2, rangedMax: 5 },
+        { t: 56,  pool: { proposal: 3, reviewer2: 1, revision: 2, interview: 1, thesis_draft: 1 }, min: 120, interval: 0.38, batch: 2, rangedMax: 7 },
+        { t: 120, pool: { proposal: 3, reviewer2: 2, project_meeting: 1, interview: 1, thesis_draft: 1 }, min: 130, interval: 0.35, batch: 2, rangedMax: 8 },
       ],
       events: [
         { t: 28,  type: 'line', enemy: 'deadline', count: 36, msg: '⏰ 마감 임박!!' },
+        { t: 40,  type: 'burst', enemy: 'interview', count: 4, msg: '👔 취업 면접 시즌! 면접관들이 압박 질문을 던진다' },
         { t: 48,  type: 'elite', enemy: 'proposal', msg: '⭐ 제안서 수정 요청' },
         { t: 96,  type: 'ring', enemy: 'reviewer2', count: 14, radius: 460, msg: '😈 Reviewer #2 등장' },
         { t: 120, type: 'elite', enemy: 'reviewer2' },
         { t: 192, type: 'line', enemy: 'deadline', count: 44, msg: '⏰ 최종 마감!!' },
       ],
-      boss: { t: 132, enemy: 'oral', msg: '학회 구두 발표 — 질문 공세가 쏟아진다!' },
+      midBoss: { t: 45, enemy: 'oral', msg: '🎤 학회 구두 발표 세션! 졸업 전 마지막 발표다' },
+      boss: { t: 105, enemy: 'thesis_defense', msg: '4학기가 끝나기 전에 졸업논문 심사를 통과해야(격파) 취업할 수 있다!' },
     },
   ];
 
   // 4차 종료 시 실적이 커트라인 미만이면 진입하는 무한 웨이브
   GS.data.phd = {
     yearSeconds: 120,   // 박사 n년차 표시 간격
-    pool: { proposal: 3, reviewer2: 2, project_meeting: 2, revision: 2, bug: 2, nan: 1, lang: 1, grading: 1, win_update: 1 },
+    pool: { proposal: 3, reviewer2: 2, project_meeting: 2, revision: 2, bug: 2, nan: 1, lang: 1, grading: 1, win_update: 1, interview: 1, thesis_draft: 1 },
     minStart: 130, minPerMin: 10, minMax: 300,
-    intervalStart: 0.35, intervalPerMin: -0.012, intervalMin: 0.2, batch: 3,
+    intervalStart: 0.35, intervalPerMin: -0.012, intervalMin: 0.2, batch: 3, rangedMax: 10,
     hpStart: 3.0, hpPerMin: 0.25,     // 체력 배율 = hpStart × (1 + hpPerMin × 경과 분)
     eventEvery: 28,
     events: [
@@ -99,7 +104,7 @@
       { type: 'burst', enemy: 'win_update', count: 8, msg: '💻 연구실 PC 일괄 업데이트!' },
       { type: 'ring', enemy: 'proposal', count: 16, radius: 460, msg: '📑 과제 제안서 시즌' },
     ],
-    bosses: ['defense', 'oral', 'kickoff', 'poster'],
+    bosses: ['poster', 'report', 'oral', 'defense'], // 학회 포스터 발표 → 과제 정기 보고 → 학회 구두 발표 → 박사 학위 논문 심사 (한 바퀴 돌면 처음부터)
     bossFirst: 48, bossEvery: 120, bossHpGrowth: 0.6,
   };
 })(window.GS = window.GS || {});

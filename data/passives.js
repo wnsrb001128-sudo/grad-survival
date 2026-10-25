@@ -21,7 +21,7 @@
       flavor: '한쪽 화면은 유튜브 전용' },
     tumbler:    { name: '텀블러',        icon: '🥤', stat: 'duration',  per: 0.10,  max: 5, desc: '지속 시간 +10% (전공서적이 도는 시간, GPT 레이저 유지 시간)',
       flavor: '설거지는 내일의 나에게' },
-    copier:     { name: '복사기',        icon: '📠', stat: 'amount',    per: 1,     max: 2, desc: '모든 무기 발사 수 +1 (책·레이저·에이전트 개수 포함)',
+    copier:     { name: '복사기',        icon: '📠', stat: 'amount',    per: 1,     max: 2, desc: '모든 무기 발사 수 +1 (책·레이저·에이전트 개수 포함, 파리채는 늘 1개)',
       flavor: '급할 때만 용지가 걸린다' },
     lan:        { name: '기가 랜선',     icon: '🔌', stat: 'projSpeed', per: 0.10,  max: 5, desc: '투사체 속도 +10% (책·Codex 회전, 클로드 코드 이동도 빨라짐)',
       flavor: '연구실 와이파이는 믿을 수 없다' },

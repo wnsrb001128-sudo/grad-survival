@@ -36,6 +36,9 @@
     chest: { three: 0.22, five: 0.05 },
 
     damageNumbers: true,
-    startWeapons: ['pen', 'mouse', 'keyboard', 'pc'],
+    // 캐릭터(Dry lab·Wet lab)별 시작 무기·기본 패시브는 data/characters.js
+
+    // 타이틀 화면 '소개 영상' 버튼으로 재생할 영상. 이 파일만 바꾸면 영상이 바뀐다 (tools/intro.html 로 만들 수 있음)
+    introVideo: 'media/intro.mp4',
   };
 })(window.GS = window.GS || {});
