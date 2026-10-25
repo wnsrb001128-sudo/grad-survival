@@ -2,7 +2,7 @@
 (function (GS) {
   'use strict';
   const A = GS.Audio = { ctx: null, master: null, muted: false, last: {} };
-  const MIN_GAP = { gem: 0.04, hurt: 0.15, item: 0.1, select: 0.05 };
+  const MIN_GAP = { gem: 0.04, hurt: 0.15, item: 0.1, select: 0.05, warn: 0.25, blast: 0.1, zap: 0.15, swing: 0.16 };
 
   A.init = function () {
     if (A.ctx) {
@@ -53,6 +53,10 @@
     clear: () => arp([523, 659, 784, 1046, 784, 1046], 0.11, 'triangle', 0.14),
     fail: () => arp([392, 330, 262, 196], 0.16, 'sawtooth', 0.08),
     dead: () => arp([330, 262, 196, 131], 0.15, 'sawtooth', 0.09),
+    warn: () => { tone('square', 880, 0, 0.07, 0.05); tone('square', 880, 0, 0.07, 0.05, 0.11); }, // 보스 패턴 예고 (삐빅)
+    blast: () => { tone('sawtooth', 160, 45, 0.28, 0.12); tone('square', 90, 40, 0.3, 0.06); },  // 예고 지역이 터질 때
+    zap: () => tone('sawtooth', 1400, 300, 0.25, 0.05),                                           // 레이저 · 질문 벽
+    swing: () => tone('triangle', 520, 170, 0.09, 0.05),                                         // 파리채 휘두르기
   };
 
   A.play = function (name) {

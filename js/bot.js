@@ -18,6 +18,7 @@
       if (o.kind === 'evolve') s = 1000;
       else if (o.kind === 'weapon') {
         if (o.id === 'gemini') s = 3;
+        else if (o.id === 'swatter') s = 4; // 바라보는 방향으로만 휘두르는 파리채는 적에게서 멀어지며 움직이는 봇이 맞히지 못한다
         else if (o.owned) s = 100 + o.owned.level * 4;
         else s = g.weapons.length < 4 ? 90 : 55;
       } else if (o.kind === 'passive') s = (PASSIVE_PRIO[o.id] || 30) + (o.owned ? 8 : 0);
@@ -31,8 +32,8 @@
     const runner = mode === 'runner';
     let fx = 0, fy = 0;
     const en = g.enemies;
-    // 근접형 무기(발열·책)만 있을 땐 적을 가까이 붙여야 한다
-    const melee = g.weapons.length <= 2 && g.weapons.some((w) => w.def.behavior === 'aura' || w.def.behavior === 'orbit');
+    // 근접형 무기(발열·책·불꽃)만 있을 땐 적을 가까이 붙여야 한다
+    const melee = g.weapons.length <= 2 && g.weapons.some((w) => w.def.behavior === 'aura' || w.def.behavior === 'orbit' || w.def.behavior === 'cone' || w.def.behavior === 'swing');
     const avoid = runner ? 320 : melee ? 70 : 150;
     for (let i = 0; i < en.length; i++) {
       const e = en[i];
@@ -90,6 +91,19 @@
     // 위험할 땐 옆으로 돌아 빠져나가도록 접선 성분 추가
     let mx = fx * dn - fy * dn * 0.45 + (tx / tl) * tw * tk;
     let my = fy * dn + fx * dn * 0.45 + (ty / tl) * tw * tk;
+    // 보스 특수 패턴 예고: 빨간 지역 안이면 무엇보다 먼저 빠져나간다 (질문 벽은 빈틈 쪽으로)
+    let hx = 0, hy = 0;
+    const hz = g.hazards;
+    for (let i = 0; i < hz.length; i++) {
+      if (hz[i].t < 0) continue;
+      const o = GS.Enemies.escape(hz[i], pl.x, pl.y, pl.r + 12);
+      if (o) { hx += o.x; hy += o.y; }
+    }
+    const hl = Math.hypot(hx, hy);
+    if (hl > 0.01) {
+      mx = (hx / hl) * 1.5 + mx * 0.35;
+      my = (hy / hl) * 1.5 + my * 0.35;
+    }
     if (Math.abs(mx) + Math.abs(my) < 0.05) {
       const a = g.time * 0.25;
       mx = Math.cos(a) * 0.5;

@@ -18,7 +18,9 @@
       this.rand = U.mulberry32(this.seed);
       this.viewW = opts.viewW || this.cfg.view.width;
       this.viewH = opts.viewH || this.cfg.view.height;
-      this.startWeapon = opts.startWeapon || this.cfg.startWeapons[0];
+      this.character = GS.data.characters[opts.character] ? opts.character : 'dry'; // Dry lab / Wet lab
+      this.charDef = GS.data.characters[this.character];
+      this.startWeapon = opts.startWeapon || this.charDef.startWeapons[0];
       this.listeners = {};
       this.init();
     }
@@ -48,6 +50,8 @@
       this.enemyPool = [];
       this.projectiles = [];
       this.enemyShots = [];
+      this.hazards = [];         // 보스 특수 패턴의 예고 지역 (js/enemies.js)
+      this.tips = {};            // 이미 설명한 보스 패턴
       this.gems = [];
       this.items = [];
       this.sanctuaries = [];
@@ -58,6 +62,7 @@
       this.score = 0;
       this.kills = 0;
       this.damageTaken = 0;
+      this.hazardHits = 0; // 보스 특수 패턴에 맞은 횟수 (시뮬레이터 통계)
       this.pendingLevelUps = 0;
       this.choice = null;
       this.freezeTimer = 0;
@@ -104,6 +109,7 @@
       this.rebuildGrid();
       GS.Weapons.update(this, dt);
       GS.Enemies.updateShots(this, dt);
+      GS.Enemies.updateHazards(this, dt);
       this.updateContact();
       this.updatePickups(dt);
       if (this.phase === 'playing') this.updateSanctuaries(dt);
@@ -152,10 +158,18 @@
       }
     }
 
+    // 4차가 끝날 때 취업 판정: 연구 실적 커트라인 + 최종 보스(4차 보스) 격파, 둘 다 해야 취업
+    finalBoss() { return this.chapters[this.chapters.length - 1].boss.enemy; }
+    finalBossDown() {
+      const id = this.finalBoss();
+      return this.bossKills.some((b) => b.id === id);
+    }
+
     openJudgment() {
-      const pass = this.score >= this.cfg.jobScore;
+      const scoreOk = this.score >= this.cfg.jobScore, bossDown = this.finalBossDown();
+      const pass = scoreOk && bossDown;
       this.sfx(pass ? 'clear' : 'fail');
-      this.openChoice({ type: 'judgment', pass, score: this.score, required: this.cfg.jobScore });
+      this.openChoice({ type: 'judgment', pass, scoreOk, bossDown, boss: this.data.enemies[this.finalBoss()].name, score: this.score, required: this.cfg.jobScore });
     }
 
     startPhd(voluntary) {
@@ -195,6 +209,8 @@
       }
       if (pl.slowTimer > 0) { pl.slowTimer -= dt; mult -= pl.slowAmt; }
       const spd = this.cfg.player.speed * Math.max(0.3, mult);
+      pl.vx = pl.moving ? ix * spd : 0; // 보스가 갈 곳을 노릴 때 쓴다
+      pl.vy = pl.moving ? iy * spd : 0;
       if (pl.moving) { pl.x += ix * spd * dt; pl.y += iy * spd * dt; }
       if (s.regen > 0 && pl.hp < pl.maxHp) pl.hp = Math.min(pl.maxHp, pl.hp + s.regen * dt);
       if (pl.invuln > 0) pl.invuln -= dt;
@@ -204,6 +220,8 @@
     recomputeStats() {
       const s = Object.assign({}, STAT_BASE);
       s.regen = this.cfg.player.regen || 0;
+      const innate = this.charDef.passive.stats; // 캐릭터 기본 패시브
+      for (const k in innate) s[k] += innate[k];
       for (let i = 0; i < this.passives.length; i++) {
         const p = this.passives[i];
         s[p.def.stat] += p.def.per * p.level;
@@ -294,7 +312,7 @@
       const wFree = !ownedOnly && this.weapons.length < this.cfg.slots.weapons;
       for (const id in WD) {
         const def = WD[id];
-        if (def.tier !== 'base') continue;
+        if (def.tier !== 'base' || (def.only && def.only !== this.character)) continue; // 다른 캐릭터 전용 무기는 제외
         const owned = this.weapons.find((w) => w.baseId === id);
         if (owned) {
           if (owned.def === def && owned.level < owned.maxLevel) pool.push({ kind: 'weapon', id, def, owned, w: def.weight || 100 });
@@ -406,12 +424,15 @@
       const dealt = Math.min(amount, e.hp);
       e.hp -= amount;
       e.flash = 0.1;
+      e.hdx = dx; // 맞은 방향 (화면 연출용)
+      e.hdy = dy;
       if (w) w.dmg += dealt;
       if (kb && e.kbResist < 1) {
         const k = kb * (1 - e.kbResist);
         e.kbx += dx * k;
         e.kby += dy * k;
       }
+      this.emit('hit', e);
       if (this.cfg.damageNumbers && this.time - e.lastText > 0.15) {
         e.lastText = this.time;
         this.addText(e.x + (this.rand() - 0.5) * 12, e.y - e.r, '' + Math.round(amount), e.boss ? '#ffd43b' : '#ffffff', e.boss ? 18 : 14, true);
@@ -430,9 +451,10 @@
       if (e.def.split) GS.Enemies.split(this, e);
       if (e.def.onDeath) GS.Enemies.deathBurst(this, e);
       if (this.effects.length < 160) this.effects.push({ kind: 'puff', x: e.x, y: e.y, t: 0, dur: 0.3, r: e.r, color: e.def.sprite.bg });
+      this.emit('kill', e);
       if (e.boss) {
-        this.bossKills.push({ name: e.def.name, time: this.time });
-        this.emit('banner', { title: `${e.def.name} 격파!`, sub: `연구 실적 +${U.fmtNum(e.score)}`, kind: 'boss' });
+        this.bossKills.push({ id: e.type, name: e.def.name, time: this.time });
+        this.emit('banner', { title: `${e.def.name} 격파!`, sub: `연구 실적 +${U.fmtNum(e.score)}`, kind: 'bossdown' });
         this.sfx('bossdown');
       }
     }
@@ -448,7 +470,9 @@
         else this.damageEnemy(e, e.hp + 1, null, 0, 0, 0);
       }
       this.enemyShots.length = 0;
+      this.hazards.length = 0;
       this.effects.push({ kind: 'flash', t: 0, dur: 0.45 });
+      this.emit('nuke');
     }
 
     updateContact() {
@@ -698,7 +722,7 @@
     // ───────── 연출용 텍스트·이펙트 ─────────
     addText(x, y, text, color, size, minor) {
       if (minor && this.texts.length > 90) return;
-      this.texts.push({ x, y, text, color, size, t: 0, dur: minor ? 0.55 : 1.2 });
+      this.texts.push({ x, y, text, color, size, t: 0, dur: minor ? 0.55 : 1.2, minor: !!minor });
     }
 
     updateEffects(dt) {
@@ -733,6 +757,9 @@
       const ch = this.chapters[this.chapterIndex];
       return {
         type,
+        character: this.charDef.name,
+        charId: this.character,
+        startWeapon: this.data.weapons[this.startWeapon].name,
         phd: this.phd,
         time: this.time,
         phdTime: this.phdTime,

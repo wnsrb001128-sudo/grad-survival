@@ -9,18 +9,19 @@
   W.refresh = function (g, w) {
     const def = w.def, b = def.base, s = g.stats;
     let dmg = b.damage || 0, cd = b.cooldown || 0, amt = b.amount || 0, pierce = b.pierce || 1;
-    let area = 1, spd = 1, dur = b.duration || 0, hit = b.hitInterval || 0;
+    let area = 1, spd = 1, dur = b.duration || 0, hit = b.hitInterval || 0, arc = b.arc || 0;
     const L = def.levels || [];
     for (let i = 0; i < w.level - 1 && i < L.length; i++) {
       const l = L[i];
       dmg += l.damage || 0; cd += l.cooldown || 0; amt += l.amount || 0; pierce += l.pierce || 0;
-      area += l.area || 0; spd += l.speed || 0; dur += l.duration || 0; hit += l.hitInterval || 0;
+      area += l.area || 0; spd += l.speed || 0; dur += l.duration || 0; hit += l.hitInterval || 0; arc += l.arc || 0;
     }
     const p = w.p || (w.p = {});
     for (const k in b) p[k] = b[k];
     p.damage = dmg * s.might;
     p.cooldown = Math.max(0.05, cd * s.cooldown);
-    p.amount = Math.max(1, amt + s.amount);
+    p.amount = b.fixedAmount ? b.amount : Math.max(1, amt + s.amount); // fixedAmount: 개수 증가 효과를 받지 않는다 (파리채)
+    if (b.arc !== undefined) p.arc = arc;
     p.pierce = pierce < 0 ? 9999 : pierce;
     p.area = area * s.area;
     p.speed = (b.speed || 0) * spd * s.projSpeed;
@@ -75,6 +76,16 @@
       hits: new Set(), color, dead: false,
     });
   }
+
+  // 두 각도의 차이 (-π ~ π)
+  function angDiff(a, b) {
+    let d = (a - b) % TAU;
+    if (d > Math.PI) d -= TAU;
+    else if (d < -Math.PI) d += TAU;
+    return d;
+  }
+
+  const SWAT_MAX = Math.PI / 2; // 파리채가 휘젓는 부채꼴은 아무리 커져도 90°
 
   const BEHAVIORS = {
     // 펜 / 교수님의 빨간펜: 가까운 적을 자동 조준해 끝까지 쫓아가 반드시 명중
@@ -147,8 +158,8 @@
         st.pt = (st.pt === undefined ? p.pulse.every : st.pt) - dt;
         if (st.pt <= 0) {
           st.pt = p.pulse.every * g.stats.cooldown;
-          shock(g, w, pl.x, pl.y, p.pulse, '#ff6b6b');
-          g.addText(pl.x, pl.y - 46, '과열!', '#e03131', 18);
+          shock(g, w, pl.x, pl.y, p.pulse, '#ff922b'); // 내 공격은 빨강을 쓰지 않는다 (빨강 = 적의 공격)
+          g.addText(pl.x, pl.y - 46, '과열!', '#f08c00', 18, true);
         }
       }
     },
@@ -236,6 +247,7 @@
           if (!canHit(g, e, w, p.hitInterval)) continue;
           const ed = Math.hypot(ex, ey) || 1;
           g.damageEnemy(e, p.damage, w, ex / ed, ey / ed, p.knockback || 0);
+          if (p.gmo && Math.random() < 0.12) g.addText(e.x, e.y - e.r - 6, '쾅!', '#2f9e44', 15, true); // 유전자 변형쥐 (연출)
         }
       }
     },
@@ -293,6 +305,146 @@
       }
     },
 
+    // 피펫 / 멀티채널 피펫: 가장 가까운 적에게 방울을 gap 초 간격으로 amount 번 연사 (한 번에 channels 줄기 부채꼴)
+    burst(g, w, dt) {
+      const p = w.p, pl = g.player, st = w.state;
+      if (st.left > 0) {
+        if ((st.gapT -= dt) > 0) return;
+        st.gapT = p.gap || 0.08;
+        st.left--;
+        const ts = g.nearestEnemies(pl.x, pl.y, p.range || 620, 1);
+        if (!ts.length) return;
+        const a0 = Math.atan2(ts[0].y - pl.y, ts[0].x - pl.x), n = p.channels || 1, sp = ((p.spread || 0) * Math.PI) / 180;
+        for (let i = 0; i < n; i++) shoot(g, w, pl.x, pl.y, a0 + (n > 1 ? (i / (n - 1) - 0.5) * sp : 0));
+        return;
+      }
+      if ((w.timer -= dt) > 0) return;
+      if (!g.nearestEnemies(pl.x, pl.y, p.range || 620, 1).length) { w.timer = 0.15; return; }
+      w.timer = p.cooldown;
+      st.left = p.amount;
+      st.gapT = 0;
+    },
+
+    // 시약병 / 과망간산칼륨: 가까운 적 무리 쪽으로 던지면 깨진 자리에 웅덩이(pool)가 생긴다
+    lob(g, w, dt) {
+      if ((w.timer -= dt) > 0) return;
+      const p = w.p, pl = g.player;
+      const ts = g.nearestEnemies(pl.x, pl.y, p.range || 440, Math.max(6, p.amount * 3));
+      if (!ts.length) { w.timer = 0.2; return; }
+      w.timer = p.cooldown;
+      for (let i = 0; i < p.amount; i++) {
+        const t = ts[(i * 3 + ((g.rand() * 3) | 0)) % ts.length]; // 여러 병이면 서로 다른 적 쪽으로
+        const tx = t.x + (g.rand() - 0.5) * 30, ty = t.y + (g.rand() - 0.5) * 30, d = Math.hypot(tx - pl.x, ty - pl.y);
+        g.projectiles.push({
+          kind: 'lob', w, x: pl.x, y: pl.y, sx: pl.x, sy: pl.y, tx, ty, t: 0,
+          dur: Math.max(0.25, d / (p.speed || 440)), rot: g.rand() * TAU, style: w.def.style, dead: false,
+        });
+      }
+    },
+
+    // 분젠 버너 / 오토클레이브: 부채꼴 불꽃. 버너는 가까운 적을 향해 duration 초 동안 뿜고 쉰다,
+    // always 이면 쉬지 않고 amount 줄기가 spin 속도로 돈다
+    cone(g, w, dt) {
+      const p = w.p, pl = g.player, st = w.state;
+      if (st.on === undefined) { st.on = false; st.t = 0; st.ang = 0; }
+      const len = (p.range || 135) * p.area, half = (p.arc || 0.75) / 2, n = p.amount;
+      st.len = len;
+      st.half = half;
+      if (p.always) st.on = true;
+      else {
+        st.t += dt;
+        if (st.on) { if (st.t >= p.duration) { st.on = false; st.t = 0; } }
+        else if (st.t >= p.cooldown) {
+          if (g.nearestEnemies(pl.x, pl.y, len + 90, 1).length) { st.on = true; st.t = 0; }
+          else st.t = p.cooldown; // 가까이 적이 올 때까지 대기
+        }
+      }
+      if (!st.on) return;
+      if (p.spin) st.ang += p.spin * dt;
+      else { // 가장 가까운 적 쪽으로 부드럽게 돌린다
+        const ts = g.nearestEnemies(pl.x, pl.y, len + 140, 1);
+        if (ts.length) {
+          let d = Math.atan2(ts[0].y - pl.y, ts[0].x - pl.x) - st.ang;
+          while (d > Math.PI) d -= TAU;
+          while (d < -Math.PI) d += TAU;
+          st.ang += d * Math.min(1, dt * 10);
+        }
+      }
+      const list = g.enemiesNear(pl.x, pl.y, len, g.qbuf);
+      for (let j = 0; j < list.length; j++) {
+        const e = list[j];
+        if (!e.active) continue;
+        const dx = e.x - pl.x, dy = e.y - pl.y, d = Math.hypot(dx, dy) || 1;
+        if (d > len + e.r) continue;
+        const a = Math.atan2(dy, dx), tol = half + Math.atan2(e.r, d);
+        let hit = false;
+        for (let i = 0; i < n && !hit; i++) {
+          let df = a - (st.ang + (i / n) * TAU);
+          while (df > Math.PI) df -= TAU;
+          while (df < -Math.PI) df += TAU;
+          hit = Math.abs(df) <= tol;
+        }
+        if (!hit || !canHit(g, e, w, p.hitInterval)) continue;
+        g.damageEnemy(e, p.damage, w, dx / d, dy / d, p.knockback || 0);
+      }
+    },
+
+    // 파리채 / 전기 모기채: 늘 꺼내 들고, 내가 바라보는(움직이는) 방향의 부채꼴(최대 90°) 안을 쉬지 않고 휘젓는다.
+    // 적이나 탄을 알아서 노리지 않는다 → 맞히기 어렵지만 한 대가 아주 세다. 파리채가 쓸고 지나간 적을 때리고(한 번 쓸 때 한 번),
+    // 부채꼴로 들어오는 일반 적의 탄은 늘 막아 낸다 (보스가 쏜 무거운 탄과 바닥의 플롯 점은 그대로).
+    // cooldown = 한쪽 끝에서 반대쪽 끝까지 한 번 쓰는 시간. 개수는 늘 1개 (fixedAmount)
+    swing(g, w, dt) {
+      const p = w.p, pl = g.player, st = w.state;
+      const R = (p.range || 80) * p.area, half = Math.min(p.arc || 1.2, SWAT_MAX) / 2;
+      if (st.dir === undefined) { st.dir = Math.atan2(pl.fy, pl.fx); st.ph = 0; st.blade = st.dir; st.vel = 0; st.popT = 0; }
+      // 바라보는 방향(발밑 파란 화살표)으로만 빠르게 돌린다. 몸을 돌릴 때 쓸고 지나간 자리는 맞지 않는다 (아래는 흔드는 움직임만 판정)
+      const maxTurn = 12 * dt;
+      st.dir += Math.max(-maxTurn, Math.min(maxTurn, angDiff(Math.atan2(pl.fy, pl.fx), st.dir)));
+      st.popT = Math.max(0, (st.popT || 0) - dt);
+      // 부채꼴 가운데(dir)를 기준으로 한쪽 끝(-half)에서 반대쪽 끝(+half)까지 T 초에 한 번 쓴다
+      const T = Math.max(0.18, p.cooldown), o0 = half * Math.sin(st.ph);
+      st.ph += (Math.PI / T) * dt;
+      const o1 = half * Math.sin(st.ph);
+      st.blade = st.dir + o1;
+      st.vel = dt > 0 ? (o1 - o0) / dt : 0;
+      st.R = R;
+      st.half = half;
+      let hit = false;
+      // 이번 프레임에 파리채가 쓸고 지나간 자리(부채꼴 안 o0 → o1) 의 적
+      const lo = Math.min(o0, o1), hi = Math.max(o0, o1);
+      const list = g.enemiesNear(pl.x, pl.y, R + 30, g.qbuf);
+      for (let j = 0; j < list.length; j++) {
+        const e = list[j];
+        if (!e.active) continue;
+        const dx = e.x - pl.x, dy = e.y - pl.y, d = Math.hypot(dx, dy) || 1;
+        if (d > R + e.r) continue;
+        const la = angDiff(Math.atan2(dy, dx), st.dir), tol = Math.atan2(e.r, d) + 0.08;
+        if (la < lo - tol || la > hi + tol) continue;
+        if (!canHit(g, e, w, T * 0.6)) continue;
+        g.damageEnemy(e, p.damage, w, dx / d, dy / d, p.knockback || 0);
+        hit = true;
+        if (st.popT <= 0) { // 세게 맞았다는 표시 (연출)
+          st.popT = 0.45;
+          const evo = w.def.tier === 'evolved';
+          g.addText(e.x, e.y - e.r - 8, evo ? '지지직!' : '찰싹!', evo ? '#1c7ed6' : '#2f9e44', 16, true);
+        }
+      }
+      // 부채꼴로 들어온 일반 적의 탄은 늘 막아 낸다 (보스 탄은 heavy 라서 못 막는다)
+      const shots = g.enemyShots;
+      for (let j = shots.length - 1; j >= 0; j--) {
+        const b = shots[j];
+        if (b.style === 'plot' || b.heavy) continue;
+        const dx = b.x - pl.x, dy = b.y - pl.y, d = Math.hypot(dx, dy);
+        if (d > R + b.r + 4) continue;
+        if (Math.abs(angDiff(Math.atan2(dy, dx), st.dir)) > half + 0.12) continue;
+        g.emit('deflect', { x: b.x, y: b.y, evo: w.def.tier === 'evolved' });
+        shots[j] = shots[shots.length - 1];
+        shots.pop();
+        hit = true;
+      }
+      if (hit) g.sfx('swing');
+    },
+
     // 게이밍 마우스: 적 무리를 드래그 선택 후 Delete
     drag_select(g, w, dt) {
       if ((w.timer -= dt) > 0) return;
@@ -337,6 +489,8 @@
       else if (p.kind === 'shock') updShock(g, p, dt);
       else if (p.kind === 'beam') updBeam(g, p, dt);
       else if (p.kind === 'box') updBox(g, p, dt);
+      else if (p.kind === 'lob') updLob(g, p, dt);
+      else if (p.kind === 'pool') updPool(g, p, dt);
     }
     let j = 0;
     for (let i = 0; i < ps.length; i++) if (!ps[i].dead) ps[j++] = ps[i];
@@ -429,6 +583,38 @@
     }
   }
 
+  // 날아가는 시약병: 떨어진 자리에 웅덩이
+  function updLob(g, p, dt) {
+    p.t += dt;
+    const k = Math.min(1, p.t / p.dur);
+    p.x = p.sx + (p.tx - p.sx) * k;
+    p.y = p.sy + (p.ty - p.sy) * k;
+    p.rot += dt * 9;
+    if (k < 1) return;
+    p.dead = true;
+    const wp = p.w.p;
+    g.projectiles.push({
+      kind: 'pool', w: p.w, x: p.tx, y: p.ty, R: (wp.radius || 52) * wp.area, t: 0,
+      dur: wp.duration || 2.6, tick: 0, damage: wp.damage, style: p.style, dead: false,
+    });
+  }
+
+  // 웅덩이: hitInterval 마다 안에 있는 적 모두에게 피해
+  function updPool(g, p, dt) {
+    p.t += dt;
+    if (p.t >= p.dur) { p.dead = true; return; }
+    if ((p.tick -= dt) > 0) return;
+    p.tick = p.w.p.hitInterval || 0.35;
+    const list = g.enemiesNear(p.x, p.y, p.R, g.qbuf);
+    for (let j = 0; j < list.length; j++) {
+      const e = list[j];
+      if (!e.active) continue;
+      const dx = e.x - p.x, dy = e.y - p.y, rr = p.R + e.r * 0.5;
+      if (dx * dx + dy * dy > rr * rr) continue;
+      g.damageEnemy(e, p.damage, p.w, 0, 0, 0);
+    }
+  }
+
   function updBox(g, p, dt) {
     p.t += dt;
     if (!p.fired && p.t >= p.delay) {
@@ -441,7 +627,7 @@
         if (Math.abs(e.x - p.x) > hw + e.r * 0.5 || Math.abs(e.y - p.y) > hh + e.r * 0.5) continue;
         g.damageEnemy(e, p.damage, p.w, 0, 0, 0);
       }
-      g.addText(p.x, p.y - hh - 6, 'Delete', '#e03131', 16);
+      g.addText(p.x, p.y - hh - 6, 'Delete', '#1c7ed6', 15, true); // 내 공격 표시는 파랑 · 연하게 (빨강은 적의 공격에만)
     }
     if (p.t >= p.dur) p.dead = true;
   }

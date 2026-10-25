@@ -1,9 +1,16 @@
-// 적 생성·행동(AI)·보스 기술, 그리고 웨이브 스폰(Spawner)
+// 적 생성·행동(AI)·보스 기술·보스 특수 패턴(예고 지역), 그리고 웨이브 스폰(Spawner)
 (function (GS) {
   'use strict';
   const U = GS.util;
   const E = GS.Enemies = {};
   const TAU = Math.PI * 2;
+  // 두 각도의 차이 (-π ~ π)
+  const angDiff = (a, b) => {
+    let d = (a - b) % TAU;
+    if (d > Math.PI) d -= TAU;
+    else if (d < -Math.PI) d += TAU;
+    return d;
+  };
 
   E.spawn = function (g, id, x, y, o) {
     o = o || {};
@@ -45,6 +52,11 @@
     e.stage = 0;
     e.growT = def.grow ? def.grow.every : 0;
     e.anim = g.rand() * 10;
+    e.castT = 0; // 보스가 특수 패턴을 준비하는 동안 거의 멈춘다
+    e.rank = o.rank || def.rank || 'BOSS'; // 보스 이름표·체력 막대에 쓰는 등급 (중간보스 / FINAL BOSS / BOSS)
+    e.p2 = false; // phase2 (최종 보스 「수정 후 재심사」)에 들어갔는지
+    e.rush = null; // 「로켓 발진」 돌진 상태 { t, a, speed, time, rest } (t < 0 이면 예고 중)
+    e.born = g.time; // 등장 연출용
     g.enemies.push(e);
     if (!g.seen[id]) {
       g.seen[id] = true;
@@ -108,9 +120,13 @@
           else if (d < R.keep - 60) { mx = (-dx / d) * e.speed * 0.7; my = (-dy / d) * e.speed * 0.7; }
           else { mx = (-dy / d) * e.speed * 0.4; my = (dx / d) * e.speed * 0.4; }
           e.shootT -= dt;
-          if (e.shootT <= 0 && d < R.keep + 220) {
+          if (e.shootT <= 0 && d < R.keep + 220) { // count 개를 부채꼴(spread)로, radial 이면 사방으로
             e.shootT = R.every;
-            E.shoot(g, e.x, e.y, Math.atan2(dy, dx), R.speed, R.damage * (e.damage / e.def.damage), R.style);
+            const a = Math.atan2(dy, dx), n = R.count || 1, dm = e.damage / e.def.damage;
+            for (let k = 0; k < n; k++) {
+              const ak = R.radial ? a + (k / n) * TAU : a + (k - (n - 1) / 2) * (R.spread || 0.2);
+              E.shoot(g, e.x, e.y, ak, R.speed, R.damage * dm, R.style);
+            }
           }
           break;
         }
@@ -160,12 +176,24 @@
         mx += sx * 60;
         my += sy * 60;
       }
+      if (e.castT > 0) {
+        e.castT -= dt;
+        mx *= 0.15;
+        my *= 0.15;
+      }
+      if (e.rush) { // 킥오프 「로켓 발진」: 예고가 끝나면 정해진 방향으로 빠르게 돌진하고, 끝나면 잠깐 멈춘다
+        const r = e.rush;
+        r.t += dt;
+        if (r.t >= 0 && r.t < r.time) { mx = Math.cos(r.a) * r.speed; my = Math.sin(r.a) * r.speed; }
+        else if (r.t >= r.time + r.rest) e.rush = null;
+      }
       if (e.skillT) E.skills(g, e, dt);
       if (e.def.grow && e.stage < e.def.grow.labels.length - 1 && (e.growT -= dt) <= 0) E.grow(g, e);
       if (e.def.trail && (e.trailT -= dt) <= 0) { // 플롯 그리기: 지나간 자리에 데이터 점
         const T = e.def.trail;
         e.trailT = T.every;
-        E.shoot(g, e.x, e.y, 0, 0, T.damage * (e.damage / e.def.damage), 'plot', null, T.life);
+        const s = E.shoot(g, e.x, e.y, 0, 0, T.damage * (e.damage / e.def.damage), 'plot', null, T.life);
+        if (s) s.owner = e.id; // 같은 적이 찍은 점끼리 선으로 잇는다 (장식)
       }
       e.x += (mx + e.kbx) * dt;
       e.y += (my + e.kby) * dt;
@@ -185,6 +213,7 @@
     const dx = pl.x - e.x, dy = pl.y - e.y, rr = B.radius + pl.r;
     g.effects.push({ kind: 'ring', x: e.x, y: e.y, t: 0, dur: 0.45, r: B.radius, color: '#1c7ed6' });
     g.addText(e.x, e.y - e.r - 6, '강제 재시작!', '#1c7ed6', 17);
+    g.emit('explode', e);
     if (dx * dx + dy * dy < rr * rr && pl.invuln <= 0) {
       g.hurtPlayer(B.damage * (e.damage / e.def.damage));
       g.jamTimer = Math.max(g.jamTimer, B.jam);
@@ -194,23 +223,32 @@
     e.active = false; // 자폭: 보상 없음
   };
 
+  // 보스가 쏜 탄은 '무거운 탄': 파리채로 막을 수 없고 진한 고리를 둘러 그린다
+  function heavy(e, s) { if (s && e && e.boss) s.heavy = true; return s; }
+
   E.skills = function (g, e, dt) {
-    const sk = e.def.skills;
+    const sk = e.def.skills, p2 = e.def.phase2;
+    if (p2 && !e.p2 && e.hp < e.maxHp * p2.at) { // 체력이 절반 아래: 모든 공격이 빨라진다
+      e.p2 = true;
+      if (p2.msg) g.toast(p2.msg, '#ff8787');
+      E.shout(g, e, '수정 후 재심사!', '#e03131');
+      g.sfx('warn');
+    }
     for (let k = 0; k < sk.length; k++) {
       e.skillT[k] -= dt;
       if (e.skillT[k] > 0) continue;
       const s = sk[k];
-      e.skillT[k] = s.every;
+      e.skillT[k] = s.every * (e.p2 ? p2.every : 1);
       const dm = e.damage / e.def.damage;
       switch (s.type) {
         case 'radial': {
           const off = g.rand() * TAU;
-          for (let i = 0; i < s.count; i++) E.shoot(g, e.x, e.y, off + (i / s.count) * TAU, s.speed, s.damage * dm, s.style, s.slow);
+          for (let i = 0; i < s.count; i++) heavy(e, E.shoot(g, e.x, e.y, off + (i / s.count) * TAU, s.speed, s.damage * dm, s.style, s.slow));
           break;
         }
         case 'aimed': {
           const a = Math.atan2(g.player.y - e.y, g.player.x - e.x);
-          for (let i = 0; i < s.count; i++) E.shoot(g, e.x, e.y, a + (i - (s.count - 1) / 2) * (s.spread || 0.18), s.speed, s.damage * dm, s.style);
+          for (let i = 0; i < s.count; i++) heavy(e, E.shoot(g, e.x, e.y, a + (i - (s.count - 1) / 2) * (s.spread || 0.18), s.speed, s.damage * dm, s.style));
           break;
         }
         case 'summon': {
@@ -228,15 +266,282 @@
           g.spawner.ring(s.enemy, s.count, s.radius, s.life || 12);
           if (s.msg) g.toast(s.msg);
           break;
+        default:
+          if (E.PATTERNS[s.type]) {
+            E.PATTERNS[s.type](g, e, s, dm);
+            if (s.tip && !g.tips[s.type]) { // 처음 보는 패턴은 피하는 법을 알려 준다
+              g.tips[s.type] = true;
+              g.toast(s.tip, '#ff8787');
+            }
+          }
       }
     }
+  };
+
+  // ───────── 보스 특수 패턴 ─────────
+  // 빨간 예고 지역(hazard)을 띄우고, warn 초 동안 안쪽이 차오른 뒤 터진다 (dur 초 동안 닿으면 한 번 피해)
+  // kind: circle 원 / band 긴 띠 / cone 부채꼴 / sweep 부채꼴을 쓸고 지나가는 빔 / wall 밀려오는 질문 벽(탄은 따로) /
+  //       ring 고리(r0~r1, 조명 패턴은 바깥 전체)
+  // delay 가 있으면 그만큼 늦게 나타나고, lead 가 있으면 나타날 때 플레이어가 갈 곳을 노린다
+  E.shout = function (g, e, text, color) {
+    g.addText(e.x, e.y - e.r - 30, text, color, 20);
+  };
+
+  E.PATTERNS = {
+    // 감기: "에… 에…" 멈칫 → 플레이어 쪽 부채꼴에 세균 분사
+    sneeze(g, e, s, dm) {
+      const a = Math.atan2(g.player.y - e.y, g.player.x - e.x);
+      e.castT = s.warn + 0.35;
+      E.hazard(g, { kind: 'cone', style: 'sneeze', owner: e, follow: true, x: e.x, y: e.y, a, half: s.arc / 2, r: s.range,
+        warn: s.warn, dur: 0.25, dmg: s.damage * dm, slow: s.slow, sk: s, dm });
+      E.shout(g, e, '에… 에…', '#2f9e44');
+    },
+    // 기말고사: 플레이어 주변에 줄무늬 답안 칸 → 한꺼번에 칠한다
+    omr(g, e, s, dm) {
+      const pl = g.player, a = g.rand() < 0.5 ? Math.PI / 2 : 0;
+      const pitch = s.width + s.gap, off = (g.rand() - 0.5) * pitch, nx = -Math.sin(a), ny = Math.cos(a);
+      for (let i = 0; i < s.bands; i++) {
+        const d = (i - (s.bands - 1) / 2) * pitch + off;
+        E.hazard(g, { kind: 'band', style: 'omr', owner: e, x: pl.x + nx * d, y: pl.y + ny * d, a, w: s.width / 2, len: s.len / 2,
+          warn: s.warn, dur: 0.3, dmg: s.damage * dm, idx: i });
+      }
+      e.castT = 0.6;
+      E.shout(g, e, '답안 마킹!', '#e03131');
+    },
+    // 과제 킥오프: 플레이어가 갈 곳을 노린 과녁을 차례로 찍고 로켓 폭격
+    strike(g, e, s, dm) {
+      for (let i = 0; i < s.count; i++) {
+        E.hazard(g, { kind: 'circle', style: 'rocket', owner: e, x: g.player.x, y: g.player.y, r: s.radius,
+          warn: s.warn, dur: 0.2, dmg: s.damage * dm, delay: i * s.gap, lead: s.lead, scatter: i ? 40 : 0 });
+      }
+      E.shout(g, e, '로드맵 발사!', '#1971c2');
+    },
+    // 포스터 발표: 한쪽에서 빈틈 하나 있는 질문 벽이 밀려온다
+    wall(g, e, s, dm) {
+      const pl = g.player, dir = ((g.rand() * 4) | 0) * (Math.PI / 2) + (g.rand() - 0.5) * 0.5;
+      const ux = Math.cos(dir), uy = Math.sin(dir), half = ((s.count - 1) / 2) * s.spacing;
+      const g0 = Math.round((s.count - s.gap) / 2 + (g.rand() - 0.5) * s.count * 0.55); // 빈틈이 시작되는 칸
+      const gapOff = (g0 + (s.gap - 1) / 2 - (s.count - 1) / 2) * s.spacing; // 빈틈 가운데 (벽 가운데 기준)
+      E.hazard(g, { kind: 'wall', style: 'wall', owner: e, x: pl.x - ux * s.dist, y: pl.y - uy * s.dist, ux, uy, half, g0, gapOff,
+        gapW: s.gap * s.spacing, speed: s.speed, warn: s.warn, dur: (s.dist * 2.2) / s.speed, dmg: 0, sk: s, dm, keep: true });
+      E.shout(g, e, '질문 있습니다!', '#7048e8');
+    },
+    // 학회 구두 발표: 부채꼴을 레이저 포인터로 한 번 쓸고 지나간다
+    laser(g, e, s, dm) {
+      const a = Math.atan2(g.player.y - e.y, g.player.x - e.x), side = g.rand() < 0.5 ? 1 : -1;
+      e.castT = s.warn + s.dur + 0.2;
+      E.hazard(g, { kind: 'sweep', style: 'laser', owner: e, follow: true, x: e.x, y: e.y, a, half: s.arc / 2,
+        a0: a - side * (s.arc / 2), a1: a + side * (s.arc / 2), r: s.range, w: s.width / 2, warn: s.warn, dur: s.dur, dmg: s.damage * dm });
+      E.shout(g, e, '레이저 포인터!', '#e03131');
+    },
+    // 학위논문 심사: 플레이어를 가로지르는 빨간펜 줄 여러 개
+    redpen(g, e, s, dm) {
+      for (let i = 0; i < s.count; i++) {
+        E.hazard(g, { kind: 'band', style: 'redpen', owner: e, x: g.player.x, y: g.player.y, a: g.rand() * Math.PI, w: s.width / 2, len: s.len / 2,
+          warn: s.warn, dur: 0.22, dmg: s.damage * dm, delay: i * s.gap, lead: 0.3, scatter: 24, turn: true });
+      }
+      E.shout(g, e, '여기 수정하세요!', '#e03131');
+    },
+    // 학위논문 심사: 발밑에 큰 원 → 재심사 도장
+    stamp(g, e, s, dm) {
+      E.hazard(g, { kind: 'circle', style: 'stamp', owner: e, x: g.player.x, y: g.player.y, r: s.radius, warn: s.warn, dur: 0.25, dmg: s.damage * dm });
+      e.castT = 0.8;
+      E.shout(g, e, '재심사!', '#c92a2a');
+    },
+    // 연구비 정산: 플레이어가 선 자리를 지나는 가로·세로 띠(행과 열)를 칠한다. 두 번째 십자는 갈 곳을 노린다
+    // 한 십자의 두 띠는 link 를 같이 써서, 교차점에 서 있어도 한 번만 맞는다
+    excel(g, e, s, dm) {
+      for (let i = 0; i < s.count; i++) {
+        const link = { hit: false };
+        for (let j = 0; j < 2; j++) {
+          E.hazard(g, { kind: 'band', style: 'excel', owner: e, x: g.player.x, y: g.player.y, a: (j * Math.PI) / 2, w: s.width / 2, len: s.len / 2,
+            warn: s.warn, dur: 0.3, dmg: s.damage * dm, delay: i * s.gap, lead: i ? 0.45 : 0, link });
+        }
+      }
+      e.castT = 0.6;
+      E.shout(g, e, '정산 마감!', '#2b8a3e');
+    },
+    // 학회 논문 초록 작성: 발밑을 중심으로 고리 여러 겹 → 안쪽 고리부터 gap 초 간격으로 터진다 (3 · 2 · 1)
+    countdown(g, e, s, dm) {
+      const pl = g.player;
+      for (let i = 0; i < s.rings; i++) {
+        E.hazard(g, { kind: 'ring', style: 'countdown', owner: e, x: pl.x, y: pl.y, r0: i * s.step, r1: (i + 1) * s.step,
+          warn: s.warn + i * s.gap, dur: 0.25, dmg: s.damage * dm, label: String(s.rings - i) });
+      }
+      e.castT = 0.6;
+      E.shout(g, e, '마감 3초 전!', '#e8590c');
+    },
+    // 과제 킥오프: 「로켓 발진」 플레이어 쪽으로 굵은 화살표 띠를 띄우고, warn 초 뒤 그 줄을 따라 돌진한 다음 rest 초 멈춘다
+    // 띠는 예고(봇도 이걸 보고 피한다)이고, 피해는 돌진하는 보스 몸에 부딪힐 때만 (몸통 접촉 피해와 별도로 한 번)
+    rush(g, e, s, dm) {
+      const a = Math.atan2(g.player.y - e.y, g.player.x - e.x), L = s.len;
+      e.rush = { t: -s.warn, a, time: s.time, speed: L / s.time, rest: s.rest };
+      e.castT = s.warn + s.time + s.rest;
+      E.hazard(g, { kind: 'band', style: 'rush', owner: e, x: e.x + (Math.cos(a) * L) / 2, y: e.y + (Math.sin(a) * L) / 2, a, w: e.r + 16, len: L / 2,
+        warn: s.warn, dur: s.time, dmg: s.damage * dm, rush: true });
+      E.shout(g, e, '로켓 발진!', '#1971c2');
+    },
+    // 과제 정기 보고: 돋보기 표적이 플레이어를 따라오다가(내 걸음보다 조금 느리게), 멈추면(확인!) 그 자리가 터진다
+    check(g, e, s, dm) {
+      for (let i = 0; i < s.count; i++) {
+        E.hazard(g, { kind: 'circle', style: 'check', owner: e, x: g.player.x, y: g.player.y, r: s.radius,
+          warn: s.warn, dur: 0.25, dmg: s.damage * dm, delay: i * s.gap, track: { speed: s.speed, lock: s.lock } });
+      }
+      e.castT = 0.5;
+      E.shout(g, e, '진도 체크하겠습니다!', '#e67700');
+    },
+    // 졸업논문 심사: 보스 반대쪽 화면 안에 조명(안전한 원)을 켜고, 조명 밖을 전부 터뜨린다
+    spotlight(g, e, s, dm) {
+      const pl = g.player, a = Math.atan2(pl.y - e.y, pl.x - e.x) + (g.rand() - 0.5) * 2;
+      const d = Math.max(60, Math.min(s.dist, Math.min(g.viewW, g.viewH) / 2 - s.radius - 30));
+      E.hazard(g, { kind: 'ring', style: 'spot', owner: e, x: pl.x + Math.cos(a) * d, y: pl.y + Math.sin(a) * d, r0: s.radius, r1: 2400,
+        warn: s.warn, dur: 0.3, dmg: s.damage * dm });
+      e.castT = 0.8;
+      E.shout(g, e, '발표자는 조명 안으로!', '#1864ab');
+    },
+  };
+
+  E.hazard = function (g, h) {
+    h.t = -(h.delay || 0);
+    h.hit = false;
+    h.fired = false;
+    h.placed = h.t >= 0;
+    h.oid = h.owner ? h.owner.id : 0;
+    if (h.placed) g.sfx('warn');
+    g.hazards.push(h);
+    return h;
+  };
+
+  E.updateHazards = function (g, dt) {
+    const hz = g.hazards;
+    if (!hz.length || g.freezeTimer > 0) return;
+    const pl = g.player;
+    for (let i = hz.length - 1; i >= 0; i--) {
+      const h = hz[i], o = h.owner;
+      // 보스가 쓰러지면 남은 예고도 사라진다 (질문 벽은 이미 날아간 탄이 있으니 끝까지 둔다)
+      if (o && (!o.active || o.id !== h.oid) && !(h.keep && h.fired)) { hz[i] = hz[hz.length - 1]; hz.pop(); continue; }
+      h.t += dt;
+      if (h.t < 0) continue;
+      if (!h.placed) { // 늦게 나타나는 예고: 이때 플레이어가 갈 곳을 노린다
+        h.placed = true;
+        const sc = h.scatter || 0, ra = g.rand() * TAU, rd = g.rand() * sc;
+        h.x = pl.x + (pl.vx || 0) * (h.lead || 0) + Math.cos(ra) * rd;
+        h.y = pl.y + (pl.vy || 0) * (h.lead || 0) + Math.sin(ra) * rd;
+        if (h.turn) h.a = g.rand() * Math.PI;
+        g.sfx('warn');
+      }
+      if (h.follow && o && o.active) { h.x = o.x; h.y = o.y; }
+      if (h.track && h.t < h.warn - h.track.lock) { // 진도 체크: 멈추기 전까지 플레이어를 일정 속도로 따라간다
+        const tx = pl.x - h.x, ty = pl.y - h.y, td = Math.hypot(tx, ty), step = h.track.speed * dt;
+        if (td > step) { h.x += (tx / td) * step; h.y += (ty / td) * step; } else { h.x = pl.x; h.y = pl.y; }
+      }
+      if (h.t >= h.warn) {
+        if (!h.fired) { h.fired = true; E.fireHazard(g, h); }
+        // 로켓 발진은 띠 전체가 아니라 돌진하는 보스 몸에 닿을 때만 맞는다
+        const inside = h.rush ? !!(o && o.active && Math.hypot(pl.x - o.x, pl.y - o.y) < o.r + pl.r * 0.75) : E.inHazard(h, pl.x, pl.y, pl.r * 0.75);
+        if (h.dmg && !h.hit && !(h.link && h.link.hit) && inside) {
+          h.hit = true;
+          if (h.link) h.link.hit = true;
+          g.hazardHits++;
+          g.hurtPlayer(h.dmg);
+          if (h.slow) g.slowPlayer(h.slow.amt, h.slow.time);
+        }
+      }
+      if (h.t >= h.warn + h.dur) { hz[i] = hz[hz.length - 1]; hz.pop(); }
+    }
+  };
+
+  // 예고가 끝나 터지는 순간: 탄을 내보내는 패턴은 여기서 쏜다
+  E.fireHazard = function (g, h) {
+    g.sfx(h.style === 'laser' || h.style === 'wall' ? 'zap' : 'blast');
+    g.emit('hazard', h);
+    const s = h.sk;
+    if (h.style === 'sneeze') {
+      for (let i = 0; i < s.count; i++) {
+        const a = h.a + (g.rand() - 0.5) * 2 * h.half, sp = s.speed * (0.65 + g.rand() * 0.6);
+        heavy(h.owner, E.shoot(g, h.x + Math.cos(a) * 20, h.y + Math.sin(a) * 20, a, sp, s.damage * 0.7 * h.dm, 'germ', s.slow, 2.2));
+      }
+      if (h.owner) E.shout(g, h.owner, '에취!', '#2f9e44');
+    } else if (h.style === 'wall') {
+      const px = -h.uy, py = h.ux;
+      for (let i = 0; i < s.count; i++) {
+        if (i >= h.g0 && i < h.g0 + s.gap) continue;
+        const o = (i - (s.count - 1) / 2) * s.spacing;
+        heavy(h.owner, E.shoot(g, h.x + px * o, h.y + py * o, Math.atan2(h.uy, h.ux), s.speed, s.damage * h.dm, s.style, null, h.dur));
+      }
+    }
+  };
+
+  // 점(x, y)이 반지름 pr 만큼 예고 지역에 걸치는지
+  E.inHazard = function (h, x, y, pr) {
+    const dx = x - h.x, dy = y - h.y;
+    switch (h.kind) {
+      case 'circle': return dx * dx + dy * dy < (h.r + pr) * (h.r + pr);
+      case 'band': {
+        const c = Math.cos(h.a), s = Math.sin(h.a);
+        return Math.abs(dx * c + dy * s) <= h.len + pr && Math.abs(-dx * s + dy * c) <= h.w + pr;
+      }
+      case 'cone': {
+        const d = Math.hypot(dx, dy);
+        if (d > h.r + pr) return false;
+        if (d < pr + 24) return true;
+        return Math.abs(angDiff(Math.atan2(dy, dx), h.a)) <= h.half + Math.asin(Math.min(1, pr / d));
+      }
+      case 'sweep': { // 지금 각도의 레이저(선분)에 닿는지
+        const k = Math.min(1, Math.max(0, (h.t - h.warn) / h.dur)), a = h.a0 + (h.a1 - h.a0) * k;
+        const c = Math.cos(a), s = Math.sin(a), along = dx * c + dy * s;
+        return along > 0 && along < h.r + pr && Math.abs(-dx * s + dy * c) <= h.w + pr;
+      }
+      case 'ring': { // 고리 r0 ~ r1 (조명은 r1 이 아주 커서 '조명 밖 전부'. 몸이 조금이라도 걸치면 맞는다)
+        const d = Math.hypot(dx, dy);
+        return d + pr > h.r0 && d - pr < h.r1;
+      }
+    }
+    return false;
+  };
+
+  // 봇용: 예고 지역 안에 있으면 빠져나갈 방향(단위 벡터), 아니면 null
+  E.escape = function (h, x, y, pr) {
+    const dx = x - h.x, dy = y - h.y;
+    if (h.kind === 'wall') { // 벽이 다가오면 빈틈 쪽으로 옆걸음
+      const t = Math.max(0, h.t - h.warn), wx = h.x + h.ux * h.speed * t, wy = h.y + h.uy * h.speed * t;
+      const ahead = (x - wx) * h.ux + (y - wy) * h.uy;
+      if (ahead < -30 || ahead > 420) return null;
+      const px = -h.uy, py = h.ux, side = (x - wx) * px + (y - wy) * py - h.gapOff;
+      if (Math.abs(side) < h.gapW / 2 - pr * 0.6) return null;
+      const sg = side > 0 ? -1 : 1;
+      return { x: px * sg, y: py * sg };
+    }
+    if (h.kind === 'sweep' || h.kind === 'cone') {
+      const fake = { kind: 'cone', x: h.x, y: h.y, a: h.a, half: h.half, r: h.r };
+      if (!E.inHazard(fake, x, y, pr)) return null;
+      const d = Math.hypot(dx, dy) || 1, diff = angDiff(Math.atan2(dy, dx), h.a);
+      const toEdge = (h.half - Math.abs(diff)) * d, toOut = h.r - d;
+      if (toOut < toEdge) return { x: dx / d, y: dy / d };
+      const sg = diff > 0 ? 1 : -1; // 가까운 모서리 쪽으로 돌아 나간다
+      return { x: -dy / d * sg, y: dx / d * sg };
+    }
+    if (!E.inHazard(h, x, y, pr)) return null;
+    if (h.kind === 'circle') {
+      const d = Math.hypot(dx, dy);
+      return d > 1 ? { x: dx / d, y: dy / d } : { x: 1, y: 0 };
+    }
+    if (h.kind === 'ring') { // 조명은 안쪽으로, 카운트다운 고리는 바깥으로 달아난다
+      const d = Math.hypot(dx, dy);
+      if (h.r1 > 1000) return d > 1 ? { x: -dx / d, y: -dy / d } : null;
+      return d > 1 ? { x: dx / d, y: dy / d } : { x: 1, y: 0 };
+    }
+    const c = Math.cos(h.a), s = Math.sin(h.a), ly = -dx * s + dy * c, sg = ly >= 0 ? 1 : -1; // band: 가까운 긴 변 쪽
+    return { x: -s * sg, y: c * sg };
   };
 
   // slow: { amt, time } 가 있으면 맞았을 때 플레이어가 느려진다 (감기 세균)
   // life: 남아 있는 시간(기본 6초). 속도 0 이면 바닥에 남는 점 (플롯 그리기)
   E.shoot = function (g, x, y, a, spd, dmg, style, slow, life) {
-    if (g.enemyShots.length > 400) return;
-    g.enemyShots.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: style === 'paper' || style === 'plot' ? 7 : 9, dmg, life: life || 6, style, a, slow: slow || null });
+    if (g.enemyShots.length > 400) return null;
+    const s = { x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: style === 'paper' || style === 'plot' ? 7 : 9, dmg, life: life || 6, style, a, slow: slow || null, born: g.time, owner: 0 };
+    g.enemyShots.push(s);
+    return s;
   };
 
   E.updateShots = function (g, dt) {
@@ -304,7 +609,7 @@
       this.pt = { x: 0, y: 0 };
     }
 
-    onChapterStart() { this.timer = 0; this.ev = 0; this.bossDone = false; this.midDone = false; }
+    onChapterStart() { this.timer = 0; this.ev = 0; this.bossDone = false; this.midDone = false; this.bossWarned = false; }
 
     onPhdStart() {
       const P = this.g.data.phd;
@@ -325,7 +630,7 @@
       const g = this.g;
       if (g.phd) {
         const P = g.data.phd, m = g.phdTime / 60;
-        const seg = this._phdSeg || (this._phdSeg = { pool: P.pool, batch: P.batch });
+        const seg = this._phdSeg || (this._phdSeg = { pool: P.pool, batch: P.batch, rangedMax: P.rangedMax });
         seg.min = Math.min(P.minMax, P.minStart + P.minPerMin * m);
         seg.interval = Math.max(P.intervalMin, P.intervalStart + P.intervalPerMin * m);
         return seg;
@@ -346,9 +651,16 @@
           this.midDone = true;
           this.spawnBoss(ch.midBoss.enemy, 1, ch.midBoss.msg, '중간보스');
         }
+        const final = g.chapterIndex === g.chapters.length - 1; // 4차 보스 = 취업 조건인 최종 보스
+        if (final && ch.boss && !this.bossWarned && g.chapterTime >= ch.boss.t - 10) {
+          this.bossWarned = true;
+          const fb = g.data.enemies[ch.boss.enemy];
+          g.toast(`${fb.sprite.emoji || '⚠️'} 10초 뒤 최종 보스 「${fb.name}」 등장! 4학기가 끝나기 전에 쓰러뜨려야 취업`, '#ff8787');
+          g.sfx('warn');
+        }
         if (ch.boss && !this.bossDone && g.chapterTime >= ch.boss.t) {
           this.bossDone = true;
-          this.spawnBoss(ch.boss.enemy, 1, ch.boss.msg);
+          this.spawnBoss(ch.boss.enemy, 1, ch.boss.msg, final ? 'FINAL BOSS' : '', final);
         }
       }
       const seg = this.segment();
@@ -357,13 +669,13 @@
       this.refillT -= dt;
       if (n < seg.min && this.refillT <= 0) {
         this.refillT = 0.1;
-        this.spawnPool(seg.pool, Math.min(seg.batch, Math.ceil(seg.min - n)));
+        this.spawnPool(seg.pool, Math.min(seg.batch, Math.ceil(seg.min - n)), seg.rangedMax);
       }
       this.timer -= dt;
       if (this.timer <= 0) {
         this.timer = seg.interval;
         // 처치가 밀려도 필드 적이 끝없이 쌓이지 않도록 최소 유지 수의 약 2배에서 멈춘다
-        if (n < (seg.cap || seg.min * 2 + 20)) this.spawnPool(seg.pool, seg.batch);
+        if (n < (seg.cap || seg.min * 2 + 20)) this.spawnPool(seg.pool, seg.batch, seg.rangedMax);
       }
     }
 
@@ -383,11 +695,17 @@
       }
     }
 
-    spawnPool(pool, n) {
+    spawnPool(pool, n, rangedMax) {
       const g = this.g, hp = this.hpMult();
+      let ranged = -1;
       for (let i = 0; i < n; i++) {
         if (g.enemies.length >= g.cfg.maxEnemies) return;
         const id = U.weightedPick(g.rand, pool);
+        if (rangedMax !== undefined && g.data.enemies[id].ai === 'ranged') { // 탄을 쏘는 적은 정해진 수까지만
+          if (ranged < 0) ranged = g.enemies.reduce((c, e) => c + (e.active && e.ai === 'ranged' ? 1 : 0), 0);
+          if (ranged >= rangedMax) continue;
+          ranged++;
+        }
         const p = this.randomEdge();
         E.spawn(g, id, p.x, p.y, { hpMult: hp });
       }
@@ -459,9 +777,15 @@
       }
     }
 
-    spawnBoss(id, extraHp, msg, label) {
-      const g = this.g, p = this.randomEdge();
-      const e = E.spawn(g, id, p.x, p.y, { hpMult: this.hpMult() * (extraHp || 1) });
+    // near: 화면 안(플레이어에서 조금 떨어진 곳)에 나타나 바로 보이게 한다 (최종 보스)
+    spawnBoss(id, extraHp, msg, label, near) {
+      const g = this.g;
+      let p = this.randomEdge();
+      if (near) {
+        const a = g.rand() * TAU, d = Math.min(g.viewW, g.viewH) / 2 - 90;
+        p = { x: g.player.x + Math.cos(a) * d, y: g.player.y + Math.sin(a) * d };
+      }
+      const e = E.spawn(g, id, p.x, p.y, { hpMult: this.hpMult() * (extraHp || 1), rank: label });
       g.emit('banner', { title: `${label || 'BOSS'} · ${e.def.name}`, sub: msg || '', kind: 'boss' });
       g.sfx('boss');
       return e;
