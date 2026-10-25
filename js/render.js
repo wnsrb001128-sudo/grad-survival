@@ -80,6 +80,8 @@
       this.banners = [];
       this.t = 0;          // 화면 시간 (항상 흐른다)
       this.wt = 0;         // 월드 시간 (게임 진행 중에만 흐른다)
+      this.rosterOn = false; // Tab: 오른쪽 '이번 학기 적' 목록 (처음엔 꺼져 있고, 게임을 다시 시작해도 그대로)
+      this.rosterK = 0;
       this.parts = [];
       this.pool = [];
       this.vis = [];
@@ -495,6 +497,7 @@
       this.drawAmbient(ctx);
       this.drawOverlays(ctx, g);
       if (!this.noHud) {
+        this.drawRoster(ctx, g, dt); // 오른쪽 '이번 학기 적' 목록, Tab 으로 켜고 끈다 (화면 밖 화살표가 그 위에 보이도록 먼저)
         this.drawIndicators(ctx, g);
         this.drawHUD(ctx, g, dt);
       }

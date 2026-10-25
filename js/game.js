@@ -69,6 +69,7 @@
       this.jamTimer = 0;
       this.sanctuaryTimer = c.sanctuary.first;
       this.seen = {};
+      this.chSeen = {}; // 이번 학기에 나온 적 종류 → 처음 나온 학기 시각 (HUD 오른쪽 적 목록)
       this.evolutions = [];
       this.bossKills = [];
       this.result = null;
@@ -148,6 +149,7 @@
       if (this.chapterIndex < this.chapters.length - 1) {
         this.chapterTime -= ch.duration;
         this.chapterIndex++;
+        this.chSeen = {};
         this.spawner.onChapterStart();
         const n = this.chapters[this.chapterIndex];
         this.emit('banner', { title: `${n.name} · ${n.title}`, sub: n.intro, kind: 'chapter' });

@@ -1,4 +1,4 @@
-// HUD: 지식 막대 · 시계와 학기 진행 막대 · 보스 체력 · 연구 실적 · 무기/패시브 칸 · 화면 밖 표시 · 알림 · 배너
+// HUD: 지식 막대 · 시계와 학기 진행 막대 · 보스 체력 · 연구 실적 · 이번 학기 적 목록(Tab) · 무기/패시브 칸 · 화면 밖 표시 · 알림 · 배너
 // 그리고 화면 전체 효과 (멘탈 위험 붉은빛, 해외출장 성에, 강제 재부팅 화면 깨짐, 번아웃 흑백)
 (function (GS) {
   'use strict';
@@ -463,6 +463,155 @@
     ctx.fillStyle = '#495057';
     ctx.textAlign = 'center';
     ctx.fillText(kt, px + pw - kw / 2, py + ph + 20.5);
+  };
+
+  // ───────── 오른쪽 '이번 학기에 나오는 적' 목록 (Tab 으로 켜고 끈다. 1차~4차만, 박사 과정에서는 없다) ─────────
+  // 웨이브 구성·이벤트·보스에 소환·분열로 생기는 적까지 모아, 학기 안에서 처음 나오는 순서대로 적는다.
+  // 일반 적과 중간보스·보스를 나눠 돌려준다 (보스: 등장 시각과 등급)
+  function rosterOf(ch, E, final) {
+    const first = {}, order = [];
+    const add = (id, t) => {
+      const d = E[id];
+      if (!d || (id in first && first[id] <= t)) return;
+      if (!(id in first)) order.push(id);
+      first[id] = t;
+      if (d.split) add(d.split.into, t + 0.1);
+      if (d.skills) d.skills.forEach((s) => {
+        if (s.type === 'summon') s.pool.forEach((p) => add(p, t + 0.1));
+        else if (s.type === 'ring') add(s.enemy, t + 0.1);
+      });
+    };
+    ch.segments.forEach((s) => Object.keys(s.pool).forEach((id) => add(id, s.t)));
+    ch.events.forEach((ev) => add(ev.enemy, ev.t));
+    const bosses = [];
+    if (ch.midBoss) bosses.push({ id: ch.midBoss.enemy, t: ch.midBoss.t, rank: '중간보스' });
+    if (ch.boss) bosses.push({ id: ch.boss.enemy, t: ch.boss.t, rank: final ? 'FINAL BOSS' : 'BOSS' });
+    bosses.forEach((b) => add(b.id, b.t));
+    return { mobs: order.filter((id) => !E[id].boss).sort((a, b) => first[a] - first[b]), bosses };
+  }
+
+  // 목록용 적 얼굴: 몸 색 동그라미 + 이모지(또는 LA·TA 같은 글자)
+  P.rosterIcon = function (id, d) {
+    return this.sprite('ricon:' + id, 22, 22, (x) => {
+      const sp = d.sprite;
+      x.beginPath();
+      x.arc(11, 11, 10, 0, TAU);
+      x.fillStyle = sp.bg;
+      x.fill();
+      x.lineWidth = 1.5;
+      x.strokeStyle = R.shade(sp.bg, -0.35);
+      x.stroke();
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      if (sp.emoji) {
+        x.font = `13px ${R.EMOJI}`;
+        x.fillStyle = '#000';
+        x.fillText(sp.emoji, 11, 11.8);
+      } else {
+        x.font = R.dfont(sp.text.length > 2 ? 8 : 10);
+        x.lineJoin = 'round';
+        x.lineWidth = 2.5;
+        x.strokeStyle = R.shade(sp.bg, -0.5);
+        x.strokeText(sp.text, 11, 11.5);
+        x.fillStyle = sp.fg || '#fff';
+        x.fillText(sp.text, 11, 11.5);
+      }
+    });
+  };
+
+  // Tab: 목록 켜기/끄기 (게임을 다시 시작해도 그대로). 켜졌으면 true
+  P.toggleRoster = function () {
+    this.rosterOn = !this.rosterOn;
+    return this.rosterOn;
+  };
+
+  // 연구 실적 패널·처치 수 아래에 그린다. 이번 학기에 아직 안 나온 적(g.chSeen 에 없음)은 흐리게,
+  // 학기 도중 처음 나오면 잠깐 노랗게 반짝인다. 아래 칸은 중간보스·보스: 등장까지 남은 시간 → '등장!' → '✓ 격파'
+  // (화면 밖 화살표가 이 목록 위에 보이도록 다른 HUD 보다 먼저 그린다: render.js. 소개 영상의 연출용 게임에서는 그리지 않는다)
+  P.drawRoster = function (ctx, g, dt) {
+    this.rosterK = Math.max(0, Math.min(1, (this.rosterK || 0) + (this.rosterOn ? dt : -dt) / 0.25));
+    if (g.phd || g.staged || this.rosterK <= 0) return;
+    const h = this.hud, E = g.data.enemies, seen = g.chSeen;
+    let st = h.roster;
+    if (!st || st.g !== g || st.ci !== g.chapterIndex) { // 학기가 바뀌면 목록을 새로 만든다
+      st = h.roster = rosterOf(g.chapters[g.chapterIndex], E, g.chapterIndex === g.chapters.length - 1);
+      Object.assign(st, { g, ci: g.chapterIndex, ct0: g.chapterTime, alive: new Set(), since: this.t });
+    }
+    st.alive.clear();
+    for (let i = 0; i < g.bigEnemies.length; i++) {
+      const e = g.bigEnemies[i];
+      if (e.boss && e.active) st.alive.add(e.type);
+    }
+    const s = this.ui, W = this.cssW / s;
+    const RH = 22, BH = 24, HEAD = 32, pw = 256, px = W - pw - 12, py = 170; // 연구 실적 패널(24~128)·처치 수(136~160) 아래
+    const ph = HEAD + st.mobs.length * RH + (st.bosses.length ? 9 + st.bosses.length * BH : 0) + 6;
+    const fa = R.outCubic(Math.min(this.rosterK, (this.t - st.since) / 0.4)); // 켤 때·학기가 바뀔 때 오른쪽에서 스르륵
+    ctx.save();
+    ctx.scale(s, s);
+    ctx.translate((1 - fa) * 24, 0);
+    ctx.globalAlpha = fa;
+    this.card(ctx, px, py, pw, ph, 14, 'rgba(255,255,255,0.92)', 'rgba(30,40,70,0.08)');
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = `800 12px ${FONT}`;
+    ctx.fillStyle = '#868e96';
+    ctx.fillText(`👾 ${g.chapters[g.chapterIndex].name}에 나오는 적`, px + 14, py + 18);
+    ctx.textAlign = 'right';
+    ctx.font = `700 10.5px ${FONT}`;
+    ctx.fillStyle = '#adb5bd';
+    ctx.fillText('Tab 끄기', px + pw - 14, py + 18);
+    ctx.textAlign = 'left';
+    let y = py + HEAD;
+    for (let i = 0; i < st.mobs.length; i++) {
+      const id = st.mobs[i], d = E[id], mt = seen[id], cy = y + RH / 2;
+      if (mt !== undefined && mt - st.ct0 > 1.5 && g.chapterTime - mt < 1.6) { // 학기 도중 처음 나온 적
+        ctx.fillStyle = `rgba(255,212,59,${(0.5 * (1 - (g.chapterTime - mt) / 1.6)).toFixed(3)})`;
+        rr(ctx, px + 6, y + 1, pw - 12, RH - 2, 7);
+        ctx.fill();
+      }
+      ctx.globalAlpha = fa * (mt === undefined ? 0.38 : 1);
+      ctx.drawImage(this.rosterIcon(id, d), px + 13, cy - 9, 18, 18);
+      ctx.font = `700 12px ${FONT}`;
+      ctx.fillStyle = '#343a40';
+      ctx.fillText(d.name, px + 38, cy + 0.5, pw - 52);
+      ctx.globalAlpha = fa;
+      y += RH;
+    }
+    if (st.bosses.length) {
+      ctx.fillStyle = 'rgba(30,40,70,0.1)';
+      ctx.fillRect(px + 12, y + 4, pw - 24, 1);
+      y += 9;
+    }
+    for (let i = 0; i < st.bosses.length; i++) {
+      const b = st.bosses[i], d = E[b.id], cy = y + BH / 2, col = this.rankColor(b.rank);
+      const down = g.bossKills.some((k) => k.id === b.id), alive = st.alive.has(b.id), left = b.t - g.chapterTime;
+      const wait = !down && !alive && left > 1;
+      const status = down ? '✓ 격파' : alive ? '등장!' : wait ? `${U.fmtTime(left)} 뒤` : '곧 등장';
+      ctx.font = `800 11px ${FONT}`;
+      const sw = ctx.measureText(status).width;
+      ctx.textAlign = 'right';
+      ctx.fillStyle = down ? '#2f9e44' : wait ? '#868e96' : col;
+      if (alive && !down) ctx.globalAlpha = fa * (0.6 + Math.sin(this.t * 6) * 0.4);
+      ctx.fillText(status, px + pw - 14, cy + 0.5);
+      ctx.globalAlpha = fa * (wait ? 0.45 : 1); // 아직 안 나온 보스는 흐리게
+      ctx.font = `900 8.5px ${FONT}`;
+      const tw = ctx.measureText(b.rank).width + 10;
+      rr(ctx, px + 12, cy - 7, tw, 14, 7);
+      ctx.fillStyle = col;
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.fillText(b.rank, px + 12 + tw / 2, cy + 0.5);
+      const ix = px + 12 + tw + 5;
+      ctx.drawImage(this.rosterIcon(b.id, d), ix, cy - 9, 18, 18);
+      ctx.font = `700 12px ${FONT}`;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#343a40';
+      ctx.fillText(d.name, ix + 23, cy + 0.5, px + pw - 22 - sw - (ix + 23));
+      ctx.globalAlpha = fa;
+      y += BH;
+    }
+    ctx.restore();
   };
 
   // 쿨타임이 남은 비율 (0~1). 늘 켜져 있는 무기는 -1

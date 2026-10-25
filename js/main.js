@@ -1,4 +1,4 @@
-// 시작점: 화면 전환, 키 입력, 게임 루프
+// 시작점: 화면 전환, 키 입력(Tab = 이번 학기 적 목록), 게임 루프
 // URL 옵션: ?start=pen (메뉴 건너뛰기, 무기로 캐릭터를 정함) / ?char=wet (캐릭터, 무기는 아무거나) / ?demo (봇 자동 플레이) / ?speed=4 (빨리 감기) / ?seed=123
 (function (GS) {
   'use strict';
@@ -106,11 +106,14 @@
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA') return; // 닉네임 입력 중에는 게임 단축키를 쓰지 않는다
     if (ui.handleKey(e)) { e.preventDefault(); return; }
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code) || (e.code === 'Tab' && game)) e.preventDefault();
     keys[e.code] = true;
     if (e.repeat) return;
     if ((e.code === 'Escape' || e.code === 'KeyP') && game && game.phase === 'playing') pauseGame();
-    else if (e.code === 'KeyM') {
+    else if (e.code === 'Tab' && game) { // 오른쪽 '이번 학기 적' 목록 켜기/끄기
+      const on = renderer.toggleRoster();
+      renderer.addToast({ text: game.phd ? '👾 적 목록은 1차~4차에만 보여요' : on ? '👾 이번 학기 적 목록 켬 (Tab)' : '👾 적 목록 끔 (Tab)' });
+    } else if (e.code === 'KeyM') {
       GS.Audio.init();
       const muted = GS.Audio.toggleMute();
       renderer.addToast({ text: muted ? '🔇 소리 끔 (M)' : '🔊 소리 켬 (M)' });

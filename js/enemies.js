@@ -62,6 +62,7 @@
       g.seen[id] = true;
       g.emit('newEnemy', def);
     }
+    if (!(id in g.chSeen)) g.chSeen[id] = g.chapterTime;
     return e;
   };
 

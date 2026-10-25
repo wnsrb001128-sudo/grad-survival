@@ -44,6 +44,15 @@
     ['project_meeting', 'bug', 'nan', 'revision'],
     ['proposal', 'reviewer2', 'interview', 'deadline'],
   ];
+  // 학기 진행 장면 오른쪽의 '등장 적' 목록: 그 학기에 새로 나오는 적 (보스가 부르거나 쪼개져 나오는 적은 뺀다)
+  // 아래에 붙는 중간보스 · 보스는 data/chapters.js 에서 가져온다
+  const SEM_ROSTER = [
+    ['lecture', 'errand', 'progress', 'midterm'],
+    ['la', 'ta', 'oa', 'lab_meeting', 'win_update', 'grading', 'plot'],
+    ['project_meeting', 'revision', 'bug', 'nan', 'lang'],
+    ['proposal', 'reviewer2', 'deadline', 'interview', 'thesis_draft'],
+  ];
+  const SEM_STEP = 2.3; // 학기 진행 장면에서 한 학기를 보여 주는 시간 (초)
   // 레벨업 · 진화 카드 (게임의 카드와 같은 모양으로 다시 그린다)
   const CARDS = [
     { kind: 'weapon', icon: { custom: 'swatter' }, name: '파리채', tag: '새 무기!', isNew: true, desc: '바라보는 방향을 휘젓는 근접 무기. 일반 적의 탄을 막아 낸다' },
@@ -59,11 +68,16 @@
 
   // 영상에 나오는 모든 글자 (MP4 를 만들기 전에 이 글자들의 웹 글꼴을 미리 불러온다)
   function texts() {
-    const C = GS.data.characters, W = GS.data.weapons, cfg = GS.data.config;
+    const C = GS.data.characters, W = GS.data.weapons, cfg = GS.data.config, E = GS.data.enemies, CH = GS.data.chapters;
     const out = [cfg.title, cfg.subtitle, URL_TEXT, '레벨 업! 카드 1장을 고르세요 진화!'];
     for (const k in CAP) out.push(CAP[k]);
     QUADS.forEach((q) => out.push(q.label + ' ' + q.name));
     SEMS.forEach((s) => out.push(s[0] + ' ' + s[1]));
+    SEM_ROSTER.forEach((ids, i) => {
+      out.push(CH[i].name + ' 등장 적 ' + ids.map((id) => E[id].name).join(' '));
+      [CH[i].midBoss, CH[i].boss].forEach((b) => { if (b) out.push(E[b.enemy].name); });
+    });
+    out.push('중간보스 보스 최종 보스');
     CARDS.concat([EVO_CARD]).forEach((c) => out.push(c.name + ' ' + c.tag + ' ' + c.desc));
     for (const k in JUDGE) out.push(JUDGE[k].title + ' ' + JUDGE[k].result + ' ' + (JUDGE[k].note || '') + ' ' + JUDGE[k].rows.map((r) => r[1]).join(' '));
     for (const id in C) out.push(C[id].name + ' ' + C[id].lab + ' ' + Object.keys(W).filter((w) => W[w].only === id).map((w) => W[w].name).join(' '));
@@ -217,6 +231,97 @@
       x.font = `800 22px ${FONT}`;
       x.fillStyle = '#ffffff';
       x.fillText(sub, px + 34 + w1 + 26, py + h / 2 + 1);
+      x.restore();
+    }
+    // 적 얼굴: 몸 색 동그라미 + 이모지(또는 LA·TA 같은 글자)
+    function enemyIcon(d, cx, cy, r) {
+      const sp = d.sprite;
+      x.beginPath();
+      x.arc(cx, cy, r, 0, TAU);
+      x.fillStyle = sp.bg;
+      x.fill();
+      x.lineWidth = 2;
+      x.strokeStyle = RR.shade(sp.bg, -0.35);
+      x.stroke();
+      if (sp.emoji) {
+        R.drawIcon(x, sp.emoji, cx, cy + 0.5, r * 1.3);
+        return;
+      }
+      x.save();
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      x.font = RR.dfont(Math.round(r * (sp.text.length > 2 ? 0.75 : 0.95)));
+      x.lineJoin = 'round';
+      x.lineWidth = 3;
+      x.strokeStyle = RR.shade(sp.bg, -0.5);
+      x.strokeText(sp.text, cx, cy + 1);
+      x.fillStyle = sp.fg || '#fff';
+      x.fillText(sp.text, cx, cy + 1);
+      x.restore();
+    }
+    // 학기 진행: 오른쪽 '등장 적' 목록 (일반 적 → 중간보스 · 보스)
+    // s = 학기(0~3), ts = 그 학기를 보여 준 지 지난 시간, h = 패널 높이 (학기가 바뀌면 부드럽게 늘고 준다)
+    const ROW = 40, BROW = 46;
+    const rosterH = (s) => 70 + SEM_ROSTER[s].length * ROW + 22 + 2 * BROW + 10;
+    function semRoster(s, ts, h, k) {
+      const a = clamp01(k);
+      if (a <= 0) return;
+      const E = GS.data.enemies, CH = GS.data.chapters, ch = CH[s], col = SEMS[s][2], last = s === CH.length - 1;
+      const ids = SEM_ROSTER[s], w = 340, px = SW - w - 28 + (1 - RR.outCubic(a)) * 40, py = 128;
+      const row = (i) => clamp01((ts - 0.05 - i * 0.07) / 0.25); // 학기가 바뀌면 위에서부터 한 줄씩
+      stage();
+      x.save();
+      x.globalAlpha = a;
+      x.shadowColor = 'rgba(20,27,46,0.2)';
+      x.shadowBlur = 20 * R.dpr;
+      x.shadowOffsetY = 6 * R.dpr;
+      RR.roundRect(x, px, py, w, h, 22);
+      x.fillStyle = 'rgba(255,255,255,0.95)';
+      x.fill();
+      x.shadowColor = 'transparent';
+      x.lineWidth = 3;
+      x.strokeStyle = col;
+      x.stroke();
+      x.clip(); // 패널이 늘어나는 동안 줄이 밖으로 삐져나오지 않게
+      x.textAlign = 'left';
+      x.textBaseline = 'middle';
+      x.font = RR.dfont(28);
+      x.fillStyle = col;
+      x.fillText(`${ch.name} 등장 적`, px + 24, py + 38);
+      ids.forEach((id, i) => {
+        const kr = row(i);
+        if (kr <= 0) return;
+        const d = E[id], cy = py + 70 + i * ROW + ROW / 2, ox = (1 - RR.outCubic(kr)) * 16;
+        x.globalAlpha = a * kr;
+        enemyIcon(d, px + 42 + ox, cy, 15);
+        x.font = `800 22px ${FONT}`;
+        x.fillStyle = '#343a40';
+        x.fillText(d.name, px + 68 + ox, cy + 1, w - 90);
+      });
+      const by = py + 70 + ids.length * ROW + 10;
+      x.globalAlpha = a * row(ids.length); // 구분선은 보스 줄과 함께 나타난다
+      x.fillStyle = 'rgba(30,40,70,0.12)';
+      x.fillRect(px + 22, by, w - 44, 2);
+      [[ch.midBoss, '중간보스', '#f76707'], [ch.boss, last ? '최종 보스' : '보스', last ? '#c92a2a' : '#e03131']].forEach(([b, rank, rc], j) => {
+        const kr = row(ids.length + j);
+        if (!b || kr <= 0) return;
+        const d = E[b.enemy], cy = by + 12 + j * BROW + BROW / 2, ox = (1 - RR.outCubic(kr)) * 16;
+        x.globalAlpha = a * kr;
+        x.font = `900 14px ${FONT}`;
+        const tw = x.measureText(rank).width + 18;
+        RR.roundRect(x, px + 22 + ox, cy - 14, tw, 28, 14);
+        x.fillStyle = rc;
+        x.fill();
+        x.fillStyle = '#ffffff';
+        x.textAlign = 'center';
+        x.fillText(rank, px + 22 + ox + tw / 2, cy + 1);
+        x.textAlign = 'left';
+        enemyIcon(d, px + 22 + ox + tw + 22, cy, 15);
+        const nx = px + 22 + ox + tw + 44;
+        x.font = `800 21px ${FONT}`;
+        x.fillStyle = '#343a40';
+        x.fillText(d.name, nx, cy + 1, px + w - 18 - nx);
+      });
       x.restore();
     }
     // 레벨업 · 진화 카드
@@ -412,6 +517,7 @@
     // 적은 직접 배치하고(스포너 끔), 플레이어는 다치지 않는다. 움직임은 봇이 맡는다
     function staged(o) {
       const g = new GS.Game({ seed: o.seed || 7, character: o.char || 'dry', startWeapon: o.weapon || 'pen', viewW: R.viewW, viewH: R.viewH });
+      g.staged = true; // 게임의 Tab 적 목록은 영상에 나오지 않게
       R.attach(g);
       R.noHud = !!o.noHud;
       R.banners.length = 0; // 앞 장면의 배너가 넘어오지 않게
@@ -686,25 +792,30 @@
         },
       },
       {
-        name: '⑥ 학기 진행', dur: 7,
-        start() { // 1.6초마다 학기가 넘어가며 적이 바뀌고, 주인공이 점점 지쳐 간다
+        name: '⑥ 학기 진행', dur: 9.5,
+        start() { // 2.3초마다 학기가 넘어가며 적이 바뀌고, 주인공이 점점 지쳐 간다. 오른쪽에는 그 학기에 나오는 적 목록
           const g = staged({ char: 'dry', weapons: ['pen', 'keyboard', 'textbook'], chapter: 0, ct: 120, noHud: true, seed: 61 });
           crowd(g, SEM_ENEMIES[0], 14, 260, 460, 2);
           preroll(g);
           this.g = g;
           this.sem = 0;
+          this.ph = rosterH(0);
         },
         frame(t, dt) {
-          const g = this.g, s = Math.min(3, Math.floor(t / 1.6));
+          const g = this.g, s = Math.min(3, Math.floor(t / SEM_STEP));
           if (s !== this.sem) {
             this.sem = s;
             g.chapterIndex = s;
             R.amb = null; // 연구실 조명도 그 학기의 분위기로 바로 바꾼다
             crowd(g, SEM_ENEMIES[s], 14, 300, 480, 2 + s);
           }
+          R.camOffX = 150; // 주인공을 조금 왼쪽에 두어 오른쪽 적 목록에 싸움이 가리지 않게
           play(g, dt);
+          R.camOffX = 0;
+          this.ph += (rosterH(s) - this.ph) * Math.min(1, dt * 12);
           const sem = SEMS[s];
           topChip(sem[0], sem[1], sem[2], s === 0 ? (t - 0.15) / 0.3 : 1);
+          semRoster(s, t - s * SEM_STEP, this.ph, (t - 0.3) / 0.4);
           caption(CAP.semester, (t - 0.4) / 0.35);
           fadeIn(t);
         },
